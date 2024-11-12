@@ -1,5 +1,6 @@
+// src/pages/Home.jsx
 import { useState, useEffect } from "react";
-import { Button, Flex, Box, Text } from "@chakra-ui/react"; // Import Chakra components
+import { Button, Flex, Box, Text } from "@chakra-ui/react";
 import api from "../api";
 
 function Home() {
@@ -27,15 +28,12 @@ function Home() {
   };
 
   return (
-    <Flex direction="column" h="100vh" justify="center" align="center">
-      {/* Header for the logout button in the top-right corner */}
+    <Flex direction="column" align="center" justify="center" h="100vh">
       <Box position="absolute" top="10px" right="10px">
         <Button colorScheme="red" onClick={handleLogout}>
           Logout
         </Button>
       </Box>
-
-      {/* Greeting message in the center */}
       <Text fontSize="3xl" fontWeight="bold">
         {username ? `Hello, ${username}!` : "Loading..."}
       </Text>

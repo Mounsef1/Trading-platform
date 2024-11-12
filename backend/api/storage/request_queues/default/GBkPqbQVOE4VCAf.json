@@ -1,0 +1,15 @@
+{
+  "url": "https://cnn.com/",
+  "unique_key": "https://cnn.com",
+  "method": "GET",
+  "headers": {},
+  "payload": null,
+  "user_data": {},
+  "retry_count": 0,
+  "no_retry": false,
+  "loaded_url": null,
+  "handled_at": null,
+  "id": "GBkPqbQVOE4VCAf",
+  "json_": "{\n  \"url\": \"https://cnn.com/\",\n  \"unique_key\": \"https://cnn.com\",\n  \"method\": \"GET\",\n  \"headers\": {},\n  \"payload\": null,\n  \"user_data\": {},\n  \"retry_count\": 0,\n  \"no_retry\": false,\n  \"loaded_url\": null,\n  \"handled_at\": null,\n  \"id\": \"GBkPqbQVOE4VCAf\",\n  \"order_no\": \"1730894260594.240904\"\n}",
+  "order_no": "1730894260594.240904"
+}
