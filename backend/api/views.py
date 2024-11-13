@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import UserInterest, ArticleData
 from .serializers import UserInterestSerializer, ArticleDataSerializer
-from .scraper import scrap_articles_bbc  # Import your scraping function
+from .scraper import scrap_articles_bbc, scrap_articles_cnn
 from django.utils.timezone import now
 import json
 import logging
@@ -65,12 +65,17 @@ class UserInterestViewSet(viewsets.ModelViewSet):
         # Step 1: Delete existing articles for the user's interest
         ArticleData.objects.filter(interest=user_interest).delete()
 
-        # Step 2: Run the scraping function for the specified interest
-        articles_json = scrap_articles_bbc([company_name])
-        articles = json.loads(articles_json)
+        # Step 2: Run both the BBC and CNN scraping functions for the specified interest
+        bbc_articles_json = scrap_articles_bbc([company_name])
+        cnn_articles_json = scrap_articles_cnn([company_name])
 
-        # Step 3: Save new articles to the database
-        for article in articles:
+        # Step 3: Combine the results
+        bbc_articles = json.loads(bbc_articles_json)
+        cnn_articles = json.loads(cnn_articles_json)
+        all_articles = bbc_articles + cnn_articles
+
+        # Step 4: Save new articles to the database
+        for article in all_articles:
             ArticleData.objects.create(
                 interest=user_interest,
                 link=article['Link'],
@@ -78,7 +83,7 @@ class UserInterestViewSet(viewsets.ModelViewSet):
                 text=article['Text']
             )
 
-        return Response({"message": "Articles scraped and saved successfully."}, status=status.HTTP_201_CREATED)
+        return Response({"message": "Articles from both BBC and CNN scraped and saved successfully."}, status=status.HTTP_201_CREATED)
 
 
 
