@@ -12,9 +12,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from urllib.parse import urlparse
 import pandas as pd
+import os
 
 # Path to Microsoft Edge WebDriver
-msedgedriver_path = r'C:\\Users\\mouns\\Documents\\fiverr\\Orders\\Order 16\\scrapping tool\\msedgedriver.exe'
+#msedgedriver_path = './msedgedriver.exe'
+msedgedriver_path = os.path.join(os.path.dirname(__file__), 'msedgedriver')
 
 # User agents for random selection in CNN scraper
 user_agents = [
@@ -177,5 +179,8 @@ def scrape_articles(names_list, source="BBC"):
     else:
         print(f"Unknown source: {source}")
         return json.dumps([])
+    
+
+initialize_driver()
 
 
