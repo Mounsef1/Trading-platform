@@ -10,10 +10,22 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import UserInterest, ArticleData
 from .serializers import UserInterestSerializer, ArticleDataSerializer
-from .scraper import scrap_articles_bbc, scrap_articles_cnn
+from .scraper import scrape_articles
 from django.utils.timezone import now
 import json
 import logging
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+from io import BytesIO
+import base64
+from rest_framework.decorators import api_view
+from django.http import JsonResponse
+from nltk.sentiment import SentimentIntensityAnalyzer
+import nltk
+import requests
+import json
+import pandas as pd
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -62,32 +74,119 @@ class UserInterestViewSet(viewsets.ModelViewSet):
         user_interest = self.get_object()
         company_name = user_interest.company_name
 
-        # Step 1: Delete existing articles for the user's interest
+        # Delete existing articles for the user's interest
         ArticleData.objects.filter(interest=user_interest).delete()
 
-        # Step 2: Run both the BBC and CNN scraping functions for the specified interest
-        bbc_articles_json = scrap_articles_bbc([company_name])
-        cnn_articles_json = scrap_articles_cnn([company_name])
+        # Fetch articles
+        articles = scrape_articles(company_name, days=7)
 
-        # Step 3: Combine the results
-        bbc_articles = json.loads(bbc_articles_json)
-        cnn_articles = json.loads(cnn_articles_json)
-        all_articles = bbc_articles + cnn_articles
-
-        # Step 4: Save new articles to the database
-        for article in all_articles:
+        # Save articles to the database
+        for article in articles:
             ArticleData.objects.create(
                 interest=user_interest,
-                link=article['Link'],
-                date=now().date(),
-                text=article['Text']
+                link=article['link'],
+                date=datetime.fromisoformat(article['date']).date(),
+                text=article['text'],
+                source=article['source']  # Save the source field
             )
 
-        return Response({"message": "Articles from both BBC and CNN scraped and saved successfully."}, status=status.HTTP_201_CREATED)
+        return Response({"message": "Articles scraped and saved successfully."}, status=status.HTTP_201_CREATED)
 
-
+            
 
 class ArticleDataViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ArticleData.objects.all()
     serializer_class = ArticleDataSerializer
+
+nltk.download('vader_lexicon')  # Download sentiment analysis data
+
+@api_view(['GET'])
+def generate_wordcloud_and_sentiment(request, interest_id):
+    try:
+        # Retrieve source parameter from query string
+        source = request.query_params.get('source', None)
+
+        # Retrieve articles for the selected interest, optionally filtering by source
+        if source:
+            articles = ArticleData.objects.filter(interest_id=interest_id, source=source)
+        else:
+            articles = ArticleData.objects.filter(interest_id=interest_id)
+
+        if not articles.exists():
+            return JsonResponse({"error": "No articles found for this interest."}, status=404)
+
+        # Combine all article texts
+        all_text = " ".join(article.text for article in articles)
+
+        # Generate word cloud
+        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(all_text)
+        buffer = BytesIO()
+        plt.figure(figsize=(10, 5))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis('off')
+        plt.savefig(buffer, format='png')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        buffer.close()
+
+        # Perform sentiment analysis
+        sia = SentimentIntensityAnalyzer()
+        sentiment = sia.polarity_scores(all_text)
+
+        return JsonResponse({
+            "wordcloud": image_base64,
+            "sentiment": sentiment  # e.g., {'neg': 0.1, 'neu': 0.8, 'pos': 0.1, 'compound': 0.0}
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+def get_sources(request):
+    sources = ArticleData.objects.values_list('source', flat=True).distinct()
+    return JsonResponse(list(sources), safe=False)
+
+
+@api_view(['GET'])
+def sentiment_time_series(request, interest_id):
+    try:
+        source = request.GET.get('source', None)
+
+        # Filter articles by interest and source
+        articles = ArticleData.objects.filter(interest_id=interest_id)
+        if source:
+            articles = articles.filter(source=source)
+
+        if not articles.exists():
+            return JsonResponse({"error": "No articles found for this interest."}, status=404)
+
+        # Perform sentiment analysis grouped by date
+        sia = SentimentIntensityAnalyzer()
+        sentiment_by_date = {}
+        for article in articles:
+            sentiment = sia.polarity_scores(article.text)
+            date = article.date
+            if date not in sentiment_by_date:
+                sentiment_by_date[date] = {"pos": [], "neu": [], "neg": []}
+            sentiment_by_date[date]["pos"].append(sentiment["pos"])
+            sentiment_by_date[date]["neu"].append(sentiment["neu"])
+            sentiment_by_date[date]["neg"].append(sentiment["neg"])
+
+        # Aggregate sentiment scores for each date
+        result = [
+            {
+                "date": date,
+                "pos": sum(values["pos"]) / len(values["pos"]),
+                "neu": sum(values["neu"]) / len(values["neu"]),
+                "neg": sum(values["neg"]) / len(values["neg"]),
+            }
+            for date, values in sentiment_by_date.items()
+        ]
+
+        # Sort results by date
+        result.sort(key=lambda x: x["date"])
+
+        return JsonResponse(result, safe=False)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 

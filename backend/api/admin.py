@@ -12,7 +12,7 @@ class UserInterestAdmin(admin.ModelAdmin):
 # Customizing the ArticleData model in the admin interface
 @admin.register(ArticleData)
 class ArticleDataAdmin(admin.ModelAdmin):
-    list_display = ('id', 'interest', 'link', 'date')  # Fields to display in list view
+    list_display = ('id', 'interest', 'source', 'link', 'date')  # Fields to display in list view
     search_fields = ('interest__company_name', 'link')  # Enable searching by interest and link
     list_filter = ('date',)  # Filter by date in the admin panel
     ordering = ('-date',)  # Order by date, latest first

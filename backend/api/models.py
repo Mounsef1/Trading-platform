@@ -19,6 +19,7 @@ class ArticleData(models.Model):
     link = models.URLField(max_length=500)
     date = models.DateField()
     text = models.TextField()
+    source = models.CharField(max_length=50)  # New field to store the API name
 
     def __str__(self):
-        return f"Article for {self.interest.company_name} on {self.date}"
+        return f"Article for {self.interest.company_name} on {self.date} from {self.source}"

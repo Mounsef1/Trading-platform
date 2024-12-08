@@ -1,186 +1,144 @@
+import requests
 import json
-import random
-import time
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from selenium import webdriver
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
-from urllib.parse import urlparse
 import pandas as pd
-import os
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
-# Path to Microsoft Edge WebDriver
-#msedgedriver_path = './msedgedriver.exe'
-msedgedriver_path = os.path.join(os.path.dirname(__file__), 'msedgedriver')
+# API keys for the new services
+NEWS_API_KEY = "d78f0a5978844825bbe9414dcf9234d9"
+ALPHA_VANTAGE_API_KEY = "8USSUHG9CIPYSADT"
 
-# User agents for random selection in CNN scraper
-user_agents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:86.0) Gecko/20100101 Firefox/86.0",
-    "Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.93 Mobile Safari/537.36"
-]
+# Function to fetch articles using News API
+def fetch_articles_news_api(topic, days):
+    from_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    url = 'https://newsapi.org/v2/everything'
+    params = {
+        'q': topic,
+        'from': from_date,
+        'sortBy': 'publishedAt',
+        'apiKey': NEWS_API_KEY,
+        'language': 'en',
+    }
 
-# Initialize WebDriver
-def initialize_driver(user_agent=None):
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument("--ignore-certificate-errors")
-    options.add_argument("--allow-insecure-localhost")
-    options.add_argument("--disable-web-security")
-    if user_agent:
-        options.add_argument(f"user-agent={user_agent}")
-
-    driver_service = Service(msedgedriver_path)
-    driver = webdriver.Edge(service=driver_service, options=options)
-    driver.set_page_load_timeout(300)
-    driver.implicitly_wait(30)
-    return driver
-
-# BBC scraping function
-def scrap_articles_bbc(names_list):
-    article_data = []
-
-    def search_and_scrape(name, news_site="BBC"):
-        driver = initialize_driver()
-        try:
-            search_query = f"{news_site} {name}"
-            search_url = f"https://www.google.com/search?q={search_query}"
-
-            driver.get(search_url)
-            wait = WebDriverWait(driver, 60)
-
-            results = driver.find_elements(By.CSS_SELECTOR, "div.g")
-            found_link = False
-            for result in results:
-                try:
-                    cite_element = result.find_element(By.TAG_NAME, "cite")
-                    if "bbc.com" in cite_element.text:
-                        link = result.find_element(By.TAG_NAME, "a").get_attribute("href")
-                        print(f"Found BBC link for '{name}': {link}")
-                        driver.get(link)
-                        found_link = True
-                        break
-                except NoSuchElementException:
-                    continue
-
-            if not found_link:
-                print(f"No BBC link found for '{name}' on {news_site}.")
-                return
-
-            time.sleep(random.uniform(2, 4))
-            title = driver.find_element(By.TAG_NAME, 'h1').text if driver.find_elements(By.TAG_NAME, 'h1') else 'NA'
-            paragraphs = driver.find_elements(By.CSS_SELECTOR, 'article p')
-            text = ' '.join([para.text for para in paragraphs if para.text])
-
-            article_data.append({
-                'Name': name,
-                'Website': news_site,
-                'Link': driver.current_url,
-                'Title': title,
-                'Text': text
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        articles = []
+        for article in data.get('articles', []):
+            # Fetch full text using the link
+            full_text = fetch_article_text(article['url'])
+            articles.append({
+                'date': article['publishedAt'],
+                'link': article['url'],
+                'text': full_text or (article['title'] + " " + (article['description'] or ""))  # Fallback to title + description
             })
-
-        except (TimeoutException, NoSuchElementException, WebDriverException) as e:
-            print(f"Error for '{name}' on {news_site}: {e}")
-        finally:
-            driver.quit()
-
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(search_and_scrape, name) for name in names_list]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                print(f"An error occurred: {e}")
-
-    return json.dumps(article_data, ensure_ascii=False, indent=4)
-
-# CNN scraping function with unified structure
-def scrap_articles_cnn(names_list):
-    article_data = []
-
-    def search_and_scrape(name):
-        driver = initialize_driver(user_agent=random.choice(user_agents))
-        wait = WebDriverWait(driver, 15)
-        search_query = f"{name} site:cnn.com"
-        search_url = f"https://www.google.com/search?q={search_query}"
-
-        try:
-            driver.get(search_url)
-            time.sleep(random.uniform(8, 12))
-
-            cnn_links = []
-            results = driver.find_elements(By.CSS_SELECTOR, 'div.g')
-            for result in results:
-                try:
-                    cite_element = result.find_element(By.TAG_NAME, 'cite')
-                    if "cnn.com" in cite_element.text:
-                        link = result.find_element(By.TAG_NAME, "a").get_attribute('href')
-                        if link not in cnn_links:
-                            cnn_links.append(link)
-                except NoSuchElementException:
-                    continue
-
-            if not cnn_links:
-                print(f"No CNN links found for '{name}'.")
-                return
-
-            for link in cnn_links:
-                driver.get(link)
-                time.sleep(random.uniform(8, 12))
-
-                try:
-                    title_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h1')))
-                    article_title = title_element.text
-                    text_elements = driver.find_elements(By.CSS_SELECTOR, 'article p')
-                    article_text = ' '.join([element.text for element in text_elements if element.text])
-
-                    article_data.append({
-                        'Name': name,
-                        'Website': "CNN",
-                        'Link': link,
-                        'Title': article_title,
-                        'Text': article_text
-                    })
-
-                except Exception as e:
-                    print(f"Error extracting details from '{link}': {e}")
-
-        except Exception as e:
-            print(f"Error processing '{name}': {e}")
-        finally:
-            driver.quit()
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(search_and_scrape, name) for name in names_list]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                print(f"An error occurred: {e}")
-
-    return json.dumps(article_data, ensure_ascii=False, indent=4)
-
-# Main function to scrape articles from either BBC or CNN
-def scrape_articles(names_list, source="BBC"):
-    if source == "BBC":
-        return scrap_articles_bbc(names_list)
-    elif source == "CNN":
-        return scrap_articles_cnn(names_list)
+        return articles
     else:
-        print(f"Unknown source: {source}")
-        return json.dumps([])
+        print(f"Failed to fetch data from News API: {response.status_code}")
+        return []
+
+# Function to fetch articles using Alpha Vantage
+# Function to fetch articles using Alpha Vantage
+ALPHA_VANTAGE_API_KEY = "8USSUHG9CIPYSADT"  # Replace with your Alpha Vantage API key
+
+ALPHA_VANTAGE_API_KEY = "8USSUHG9CIPYSADT"  # Replace with your Alpha Vantage API key
+
+# Function to fetch articles from Alpha Vantage
+def fetch_articles_alpha_vantage(topic, days):
+    """
+    Fetch articles using Alpha Vantage API, filter by date, and fetch full text for each article.
     
+    :param topic: The keyword or topic to search for (e.g., "Bitcoin", "Tesla").
+    :param days: Number of previous days to filter the news.
+    :return: A list of articles with metadata and full text.
+    """
+    # Define the API endpoint and parameters
+    url = f"https://www.alphavantage.co/query"
+    params = {
+        "function": "NEWS_SENTIMENT",
+        "keywords": topic,
+        "apikey": ALPHA_VANTAGE_API_KEY
+    }
+    
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        if "feed" in data:
+            # Convert the response to a pandas DataFrame
+            news_df = pd.DataFrame(data["feed"])
+            news_df = news_df.rename(columns={"time_published": "date", "url": "link", "title": "text"})
+            news_df = news_df[["date", "link", "text"]]
+            news_df["date"] = pd.to_datetime(news_df["date"], format="%Y%m%dT%H%M%S")
+            
+            # Filter rows by the specified number of previous days
+            cutoff_date = datetime.now() - timedelta(days=days)
+            filtered_df = news_df[news_df["date"] >= cutoff_date]
+            
+            # Fetch full text for each article
+            articles = []
+            for _, row in filtered_df.iterrows():
+                full_text = fetch_article_text(row['link'])
+                articles.append({
+                    'date': row['date'].isoformat(),
+                    'link': row['link'],
+                    'text': full_text or row['text'],  # Fallback to the title if full text isn't available
+                    'source': 'Alpha Vantage'
+                })
+            return articles
+        else:
+            print("No news data found for this topic.")
+            return []
+    else:
+        print(f"Failed to fetch data: {response.status_code}")
+        return []
 
-initialize_driver()
+# Function to fetch the full text of an article from its URL
+def fetch_article_text(url):
+    """
+    Fetch the full text of an article from its URL.
+    
+    :param url: The URL of the article.
+    :return: The full text of the article or None if not accessible.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            paragraphs = soup.find_all('p')
+            full_text = ' '.join([para.get_text() for para in paragraphs if para.get_text()])
+            return full_text.strip()
+        else:
+            print(f"Failed to fetch article content from {url}: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Error fetching article content from {url}: {e}")
+        return None
 
 
+# Function to fetch the full text of an article from its URL
+
+
+# Unified function to fetch articles from multiple sources
+def scrape_articles(topic, days):
+    """
+    Fetch articles from multiple sources, including News API and Alpha Vantage.
+    
+    :param topic: The keyword or topic to search for.
+    :param days: Number of previous days to filter.
+    :return: A combined list of articles from all sources.
+    """
+    news_api_articles = fetch_articles_news_api(topic, days)
+    alpha_vantage_articles = fetch_articles_alpha_vantage(topic, days)
+
+    # Add source name to each article
+    for article in news_api_articles:
+        article['source'] = 'News API'
+
+    for article in alpha_vantage_articles:
+        article['source'] = 'Alpha Vantage'
+
+    return news_api_articles + alpha_vantage_articles
+    
